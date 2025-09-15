@@ -26,43 +26,61 @@ OpenTenBase 采用分布式集群架构（如下图）， 该架构分布式为�
 
 ## OpenTenBase源码编译安装
 
-### 系统要求: 
+### 系统要求
 
-Memory: 4G RAM minimum
+内存: 最小 8G RAM
 
-OS: TencentOS 2, TencentOS 3, OpenCloudOS, CentOS 7, CentOS 8, Ubuntu
+操作系统: TencentOS 2, TencentOS 3, OpenCloudOS 8.x, CentOS 7, CentOS 8, Ubuntu 18.04
 
-### 安装依赖
+### 依赖
 
-` yum -y install gcc make readline-devel zlib-devel openssl-devel uuid-devel bison flex git`
-
-或
-
-` apt install -y gcc make libreadline-dev zlib1g-dev libssl-dev libossp-uuid-dev bison flex git`
-
-- **创建opentenbase用户**
-
-	注意：所有需要安装OpenTenBase集群的机器上都需要创建
-
-``` shell
-mkdir /data
-useradd -d /data/opentenbase -s /bin/bash -m opentenbase
-passwd opentenbase # set password
+``` 
+yum -y install git sudo gcc make readline-devel zlib-devel openssl-devel uuid-devel bison flex cmake postgresql-devel libssh2-devel sshpass libcurl-devel libxml2-devel
 ```
 
-- **源码获取**
+或者
 
 ```
+apt install -y git sudo gcc make libreadline-dev zlib1g-dev libssl-dev libossp-uuid-dev bison flex cmake libssh2-1-dev sshpass libxml2-dev language-pack-zh-hans
+```
+
+### 创建用户 'opentenbase'
+
+```bash
+# 1. 创建目录 /data
+mkdir -p /data
+
+# 2. 添加用户
+useradd -d /data/opentenbase -s /bin/bash -m opentenbase # 添加用户 opentenbase
+
+# 3. 设置密码
+passwd opentenbase # 设置密码
+
+# 4. 将用户添加到 wheel 组
+# 对于 RedHat
+usermod -aG wheel opentenbase
+# 对于 Debian
+usermod -aG sudo opentenbase
+
+# 5. 为 wheel 组启用 sudo 权限（通过 visudo）
+visudo 
+# 然后取消注释 "% wheel" 行，保存并退出
+```
+
+### 编译
+
+```bash
+su - opentenbase
+cd /data/opentenbase/
 git clone https://github.com/OpenTenBase/OpenTenBase
-```
 
-- **源码编译**
+export SOURCECODE_PATH=/data/opentenbase/OpenTenBase
+export INSTALL_PATH=/data/opentenbase/install/
 
-``` shell
 cd ${SOURCECODE_PATH}
-rm -rf ${INSTALL_PATH}/opentenbase_bin_v2.0
+rm -rf ${INSTALL_PATH}/opentenbase_bin_v5.0
 chmod +x configure*
-./configure --prefix=${INSTALL_PATH}/opentenbase_bin_v2.0  --enable-user-switch --with-openssl  --with-ossp-uuid CFLAGS=-g
+./configure --prefix=${INSTALL_PATH}/opentenbase_bin_v5.0 --enable-user-switch --with-libxml --disable-license --with-openssl --with-ossp-uuid CFLAGS="-g"
 make clean
 make -sj
 make install
@@ -72,507 +90,221 @@ make -sj
 make install
 ```
 
-本文的使用环境中，上述两个参数如下
-
-```
-${SOURCECODE_PATH}=/data/opentenbase/OpenTenBase	
-${INSTALL_PATH}=/data/opentenbase/install
-```
-- **集群安装**
-
-	- **集群规划**
-
-	下面以两台服务器上搭建1GTM主，1GTM备，2CN主（CN主之间对等，因此无需备CN），2DN主，2DN备的集群，该集群为具备容灾能力的最小配置
-	
-```
-机器1：10.215.147.158
-机器2：10.240.138.159
-```
-
-  集群规划如下：
-
-  |节点名称|IP|数据目录|
-  |---|---|---|
-  |GTM master|10.215.147.158|/data/opentenbase/data/gtm|
-  |GTM slave|10.240.138.159|/data/opentenbase/data/gtm|
-  |CN1|10.215.147.158|/data/opentenbase/data/coord|
-  |CN2|10.240.138.159|/data/opentenbase/data/coord|
-  |DN1 master|10.215.147.158|/data/opentenbase/data/dn001|
-  |DN1 slave|10.240.138.159|/data/opentenbase/data/dn001|
-  |DN2 master|10.240.138.159|/data/opentenbase/data/dn002|
-  |DN2 slave|10.215.147.158|/data/opentenbase/data/dn002|
-
-  示意图
-
+## 安装
+使用 OPENTENBASE\_CTL 工具来搭建一个集群，例如：搭建一个具有1个全局事务管理节点(GTM)、1个协调器节点(COORDINATOR)以及2个数据节点(DATANODE)的集群。
   ![OpenTenBase部署示意图](images/node_ip.png)
+### 准备工作
 
-  - **禁用 SELinux 和 防火墙 (可选)**
-
-```shell
-vi /etc/selinux/config # disable SELinux, change SELINUX=enforcing to SELINUX=disabled
-# disable firewall, for Ubuntu, change firewalld to ufw
-systemctl disable firewalld
-systemctl stop firewalld
-```
-
-  - **机器间的ssh互信配置**
+#### 1. 安装 opentenbase 并将 opentenbase 安装包的路径导入到环境变量中。
 
 ```shell
-su opentenbase
-ssh-keygen -t rsa
-ssh-copy-id -i ~/.ssh/id_rsa.pub destination-user@destination-server
-```
-
-      参考[Linux ssh互信配置](https://blog.csdn.net/chenghuikai/article/details/52807074)
-
-  - **环境变量配置**
-
-  集群所有机器都需要配置
-  
-
-``` shell
-[opentenbase@localhost ~]$ vim ~/.bashrc
-export OPENTENBASE_HOME=/data/opentenbase/install/opentenbase_bin_v2.0
-export PATH=$OPENTENBASE_HOME/bin:$PATH
-export LD_LIBRARY_PATH=$OPENTENBASE_HOME/lib:${LD_LIBRARY_PATH}
+PG_HOME=${INSTALL_PATH}/opentenbase_bin_v5.0
+export PATH="$PATH:$PG_HOME/bin"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PG_HOME/lib"
 export LC_ALL=C
 ```
 
-以上，已经配置好了所需要基础环境，可以进入到集群初始化阶段，为了方便用户，OpenTenBase提供了专用的配置和操作工具：**pgxc_ctl**来协助用户快速搭建并管理集群，首先需要将前文所述的节点的ip，端口，目录写入到配置文件 pgxc\_ctl.conf 中。
+#### 2. 禁用 SELinux 和防火墙（可选）
 
-  - **初始化pgxc_ctl.conf文件**
+```
+vi /etc/selinux/config 
+set SELINUX=disabled
 
-```shell
-[opentenbase@localhost ~]$ mkdir /data/opentenbase/pgxc_ctl
-[opentenbase@localhost ~]$ cd /data/opentenbase/pgxc_ctl
-[opentenbase@localhost ~/pgxc_ctl]$ vim pgxc_ctl.conf
+# 禁用防火墙
+sudo systemctl disable firewalld
+sudo systemctl stop firewalld
 ```
 
-如下，是结合上文描述的IP，端口，数据库目录，二进制目录等规划来写的pgxc_ctl.conf文件。具体实践中只需按照自己的实际情况配置好即可。
+#### 3. 创建用于初始化实例的 *.tar.gz 包。
 
-亦可从此处下载，修改文件名为 ```pgxc_ctl.conf``` ，按照实际情况修改内容：
+```
+cd ${PG_HOME}
+tar -zcf ${INSTALL_PATH}/opentenbase-5.21.8-i.x86_64.tar.gz *
+cd ${INSTALL_PATH}
+```
 
-[点击此处下载双节点配置](./pgxc_ctl_double.conf)
+### 集群启动步骤
 
-[点击此处下载单节点配置](./pgxc_ctl_single.conf)
+#### 生成并填写配置文件 
+opentenbase\_config.opentenbase\_ctl 工具可以生成配置文件的模板。您需要在模板中填写集群节点信息。启动 opentenbase\_ctl 工具后，将在当前用户的主目录中生成 opentenbase\_ctl 目录。输入 "prepare config" 命令后，将在 opentenbase\_ctl 目录中生成可直接修改的配置文件模板。
 
-``` shell
-#!/bin/bash
-# Double Node Config
-
-IP_1=10.215.147.158
-IP_2=10.240.138.159
-
-pgxcInstallDir=/data/opentenbase/install/opentenbase_bin_v2.0
-pgxcOwner=opentenbase
-defaultDatabase=postgres
-pgxcUser=$pgxcOwner
-tmpDir=/tmp
-localTmpDir=$tmpDir
-configBackup=n
-configBackupHost=pgxc-linker
-configBackupDir=$HOME/pgxc
-configBackupFile=pgxc_ctl.bak
-
-
-#---- GTM ----------
-gtmName=gtm
-gtmMasterServer=$IP_1
-gtmMasterPort=50001
-gtmMasterDir=/data/opentenbase/data/gtm
-gtmExtraConfig=none
-gtmMasterSpecificExtraConfig=none
-gtmSlave=y
-gtmSlaveServer=$IP_2
-gtmSlavePort=50001
-gtmSlaveDir=/data/opentenbase/data/gtm
-gtmSlaveSpecificExtraConfig=none
-
-#---- Coordinators -------
-coordMasterDir=/data/opentenbase/data/coord
-coordArchLogDir=/data/opentenbase/data/coord_archlog
-
-coordNames=(cn001 cn002 )
-coordPorts=(30004 30004 )
-poolerPorts=(31110 31110 )
-coordPgHbaEntries=(0.0.0.0/0)
-coordMasterServers=($IP_1 $IP_2)
-coordMasterDirs=($coordMasterDir $coordMasterDir)
-coordMaxWALsernder=2
-coordMaxWALSenders=($coordMaxWALsernder $coordMaxWALsernder )
-coordSlave=n
-coordSlaveSync=n
-coordArchLogDirs=($coordArchLogDir $coordArchLogDir)
-
-coordExtraConfig=coordExtraConfig
-cat > $coordExtraConfig <<EOF
-#================================================
-# Added to all the coordinator postgresql.conf
-# Original: $coordExtraConfig
-
-include_if_exists = '/data/opentenbase/global/global_opentenbase.conf'
-
-wal_level = replica
-wal_keep_segments = 256 
-max_wal_senders = 4
-archive_mode = on 
-archive_timeout = 1800 
-archive_command = 'echo 0' 
-log_truncate_on_rotation = on 
-log_filename = 'postgresql-%M.log' 
-log_rotation_age = 4h 
-log_rotation_size = 100MB
-hot_standby = on 
-wal_sender_timeout = 30min 
-wal_receiver_timeout = 30min 
-shared_buffers = 1024MB 
-max_pool_size = 2000
-log_statement = 'ddl'
-log_destination = 'csvlog'
-logging_collector = on
-log_directory = 'pg_log'
-listen_addresses = '*'
-max_connections = 2000
-
-EOF
-
-coordSpecificExtraConfig=(none none)
-coordExtraPgHba=coordExtraPgHba
-cat > $coordExtraPgHba <<EOF
-
-local   all             all                                     trust
-host    all             all             0.0.0.0/0               trust
-host    replication     all             0.0.0.0/0               trust
-host    all             all             ::1/128                 trust
-host    replication     all             ::1/128                 trust
-
-
-EOF
-
-
-coordSpecificExtraPgHba=(none none)
-coordAdditionalSlaves=n 
-cad1_Sync=n
-
-#---- Datanodes ---------------------
-dn1MstrDir=/data/opentenbase/data/dn001
-dn2MstrDir=/data/opentenbase/data/dn002
-dn1SlvDir=/data/opentenbase/data/dn001
-dn2SlvDir=/data/opentenbase/data/dn002
-dn1ALDir=/data/opentenbase/data/datanode_archlog
-dn2ALDir=/data/opentenbase/data/datanode_archlog
-
-primaryDatanode=dn001
-datanodeNames=(dn001 dn002)
-datanodePorts=(40004 40004)
-datanodePoolerPorts=(41110 41110)
-datanodePgHbaEntries=(0.0.0.0/0)
-datanodeMasterServers=($IP_1 $IP_2)
-datanodeMasterDirs=($dn1MstrDir $dn2MstrDir)
-dnWALSndr=4
-datanodeMaxWALSenders=($dnWALSndr $dnWALSndr)
-
-datanodeSlave=y
-datanodeSlaveServers=($IP_2 $IP_1)
-datanodeSlavePorts=(50004 54004)
-datanodeSlavePoolerPorts=(51110 51110)
-datanodeSlaveSync=n
-datanodeSlaveDirs=($dn1SlvDir $dn2SlvDir)
-datanodeArchLogDirs=($dn1ALDir/dn001 $dn2ALDir/dn002)
-
-datanodeExtraConfig=datanodeExtraConfig
-cat > $datanodeExtraConfig <<EOF
-#================================================
-# Added to all the coordinator postgresql.conf
-# Original: $datanodeExtraConfig
-
-include_if_exists = '/data/opentenbase/global/global_opentenbase.conf'
-listen_addresses = '*' 
-wal_level = replica 
-wal_keep_segments = 256 
-max_wal_senders = 4
-archive_mode = on 
-archive_timeout = 1800 
-archive_command = 'echo 0' 
-log_directory = 'pg_log' 
-logging_collector = on 
-log_truncate_on_rotation = on 
-log_filename = 'postgresql-%M.log' 
-log_rotation_age = 4h 
-log_rotation_size = 100MB
-hot_standby = on 
-wal_sender_timeout = 30min 
-wal_receiver_timeout = 30min 
-shared_buffers = 1024MB 
-max_connections = 4000 
-max_pool_size = 4000
-log_statement = 'ddl'
-log_destination = 'csvlog'
-wal_buffers = 1GB
-
-EOF
-
-datanodeSpecificExtraConfig=(none none)
-datanodeExtraPgHba=datanodeExtraPgHba
-cat > $datanodeExtraPgHba <<EOF
-
-local   all             all                                     trust
-host    all             all             0.0.0.0/0               trust
-host    replication     all             0.0.0.0/0               trust
-host    all             all             ::1/128                 trust
-host    replication     all             ::1/128                 trust
-
-
-EOF
-
-
-datanodeSpecificExtraPgHba=(none none)
-
-datanodeAdditionalSlaves=n
-walArchive=n
+* opentenbase\_config.ini 中各字段说明
+```
+| 配置类别        | 配置项            | 说明                                                                      |
+|----------------|------------------|---------------------------------------------------------------------------||
+| instance       | name             | 实例名称，可用字符：字母、数字、下划线，例如：opentenbase_instance01        |
+|                | type             | distributed 表示分布式模式，需要 gtm、coordinator 和 data 节点；centralized 表示集中式模式 |
+|                | package          | 软件包。完整路径（推荐）或相对于 opentenbase_ctl 的相对路径                  |
+| gtm            | master           | 主节点，只有一个 IP                                                        |
+|                | slave            | 从节点。如果需要 n 个从节点，在此配置 n 个 IP，用逗号分隔                    |
+| coordinators   | master           | 主节点 IP，自动生成节点名称，在每个 IP 上部署 nodes-per-server 个节点        |
+|                | slave            | 从节点 IP，数量是主节点的整数倍                                             |
+|                |                  | 示例：如果 1 主 1 从，IP 数量与主节点相同；如果 1 主 2 从，IP 数量是主节点的两倍 |
+|                | nodes-per-server | 可选，默认 1。每个 IP 上部署的节点数。示例：主节点有 3 个 IP，配置为 2，则有 6 个节点 |
+|                |                  | cn001-cn006 共 6 个节点，每个服务器分布 2 个节点                            |
+| datanodes      | master           | 主节点 IP，自动生成节点名称，在每个 IP 上部署 nodes-per-server 个节点        |
+|                | slave            | 从节点 IP，数量是主节点的整数倍                                             |
+|                |                  | 示例：如果 1 主 1 从，IP 数量与主节点相同；如果 1 主 2 从，IP 数量是主节点的两倍 |
+|                | nodes-per-server | 可选，默认 1。每个 IP 上部署的节点数。示例：主节点有 3 个 IP，配置为 2，则有 6 个节点 |
+|                |                  | dn001-dn006 共 6 个节点，每个服务器分布 2 个节点                            |
+| server         | ssh-user         | 远程命令执行用户名，需要提前创建，所有服务器应有相同账户以简化配置管理          |
+|                | ssh-password     | 远程命令执行密码，需要提前创建，所有服务器应有相同密码以简化配置管理            |
+|                | ssh-port         | SSH 端口，所有服务器应保持一致以简化配置管理                                 |
+| log            | level            | opentenbase_ctl 工具执行的日志级别（不是 opentenbase 节点的日志级别）        |
 
 ```
 
-- **分发二进制包**
-
-在一个节点配置好配置文件后，需要预先将二进制包部署到所有节点所在的机器上，这个可以使用pgxc_ctl工具，执行**deploy all**命令来完成。
-
-```shell
-[opentenbase@localhost ~/pgxc_ctl]$ pgxc_ctl 
-/usr/bin/bash
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Reading configuration using /data/opentenbase/pgxc_ctl/pgxc_ctl_bash --home /data/opentenbase/pgxc_ctl --configuration /data/opentenbase/pgxc_ctl/pgxc_ctl.conf
-Finished reading configuration.
-   ******** PGXC_CTL START ***************
-
-Current directory: /data/opentenbase/pgxc_ctl
-PGXC deploy all
-Deploying Postgres-XL components to all the target servers.
-Prepare tarball to deploy ... 
-Deploying to the server 10.215.147.158.
-Deploying to the server 10.240.138.159.
-Deployment done.
-
-登录到所有节点，check二进制包是否分发OK
-[opentenbase@localhost ~/install]$ ls /data/opentenbase/install/opentenbase_bin_v2.0
-bin  include  lib  share	
+#### 1. 为实例创建配置文件 opentenbase\_config.ini
+```
+mkdir -p ./logs
+touch opentenbase_config.ini
+vim opentenbase_config.ini
 ```
 
-* 执行**init all**命令，完成集群初始化命令
+* 例如，如果我有两台服务器 172.16.16.49 和 172.16.16.131，分布在两台服务器上的典型分布式实例配置如下。您可以复制此配置信息并根据您的部署要求进行修改。不要忘记填写 ssh 密码配置。
+```
+# 实例配置
+[instance]
+name=opentenbase01
+type=distributed
+package=/data/opentenbase/install/opentenbase-5.21.8-i.x86_64.tar.gz
 
-```shell
-[opentenbase@localhost ~]$ pgxc_ctl
-/usr/bin/bash
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Reading configuration using /data/opentenbase/pgxc_ctl/pgxc_ctl_bash --home /data/opentenbase/pgxc_ctl --configuration /data/opentenbase/pgxc_ctl/pgxc_ctl.conf
-Finished reading configuration.
-   ******** PGXC_CTL START ***************
+# GTM 节点
+[gtm]
+master=172.16.16.49
+slave=172.16.16.50,172.16.16.131
 
-Current directory: /data/opentenbase/pgxc_ctl
-PGXC init all
-Initialize GTM master
-....
-....
-Initialize datanode slave dn001
-Initialize datanode slave dn002
-mkdir: cannot create directory '/data1/opentenbase': Permission denied
-chmod: cannot access '/data1/opentenbase/data/dn001': No such file or directory
-pg_ctl: directory "/data1/opentenbase/data/dn001" does not exist
-pg_basebackup: could not create directory "/data1/opentenbase": Permission denied
+# 协调器节点
+[coordinators]
+master=172.16.16.49
+slave= 172.16.16.131
+nodes-per-server=1
+
+# 数据节点
+[datanodes]
+master=172.16.16.49,172.16.16.131
+slave=172.16.16.131,172.16.16.49
+nodes-per-server=1
+
+# 登录和部署账户
+[server]
+ssh-user=opentenbase
+ssh-password=
+ssh-port=36000
+
+# 日志配置
+[log]
+level=DEBUG
 ```
 
-- **安装错误处理**
 
-一般init集群出错，终端会打印出错误日志，通过查看错误原因，更改配置即可，或者可以通过/data/opentenbase/pgxc\_ctl/pgxc_log路径下的错误日志查看错误，排查配置文件的错误
+* 同样，典型集中式实例的配置如下。不要忘记填写 ssh 密码配置。
+```
+# 实例配置
+[instance]
+name=opentenbase02
+type=centralized
+package=/data/opentenbase/install/opentenbase-5.21.8-i.x86_64.tar.gz
 
-```shell
-[opentenbase@localhost ~]$ ll ~/pgxc_ctl/pgxc_log/
-total 184
--rw-rw-r-- 1 opentenbase opentenbase 81123 Nov 13 17:22 14105_pgxc_ctl.log
--rw-rw-r-- 1 opentenbase opentenbase  2861 Nov 13 17:58 15762_pgxc_ctl.log
--rw-rw-r-- 1 opentenbase opentenbase 14823 Nov 14 07:59 16671_pgxc_ctl.log
--rw-rw-r-- 1 opentenbase opentenbase  2721 Nov 13 16:52 18891_pgxc_ctl.log
--rw-rw-r-- 1 opentenbase opentenbase  1409 Nov 13 16:20 22603_pgxc_ctl.log
--rw-rw-r-- 1 opentenbase opentenbase 60043 Nov 13 16:33 28932_pgxc_ctl.log
--rw-rw-r-- 1 opentenbase opentenbase 15671 Nov 14 07:57 6849_pgxc_ctl.log
+# 数据节点
+[datanodes]
+master=172.16.16.49
+slave=172.16.16.131
+nodes-per-server=1
+
+# 登录和部署账户
+[server]
+ssh-user=opentenbase
+ssh-password=
+ssh-port=36000
+
+# 日志配置
+[log]
+level=DEBUG
 ```
 
-通过运行 pgxc\_ctl 工具，执行**clean all**命令删除已经初始化的文件，修改pgxc\_ctl.conf文件，重新执行**init all**命令重新发起初始化。
+#### 2. 执行实例安装命令。
 
-```shell
-[opentenbase@localhost ~]$ pgxc_ctl
-/usr/bin/bash
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Reading configuration using /data/opentenbase/pgxc_ctl/pgxc_ctl_bash --home /data/opentenbase/pgxc_ctl --configuration /data/opentenbase/pgxc_ctl/pgxc_ctl.conf
-Finished reading configuration.
-   ******** PGXC_CTL START ***************
+```
+export LD_LIBRARY_PATH=/data/opentenbase/install/opentenbase_bin_v5.0/lib
+./opentenbase_bin_v5.0/bin/opentenbase_ctl install  -c opentenbase_config.ini
 
-Current directory: /data/opentenbase/pgxc_ctl
-PGXC clean all
+====== Start to Install Opentenbase test_cluster01  ====== 
 
+step 1: Make *.tar.gz pkg ...
+    Make opentenbase-5.21.8-i.x86_64.tar.gz successfully.
 
-[opentenbase@localhost ~]$ pgxc_ctl
-/usr/bin/bash
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Reading configuration using /data/opentenbase/pgxc_ctl/pgxc_ctl_bash --home /data/opentenbase/pgxc_ctl --configuration /data/opentenbase/pgxc_ctl/pgxc_ctl.conf
-Finished reading configuration.
-   ******** PGXC_CTL START ***************
+step 2: Transfer and extract pkg to servers ...
+    Package_path: /data/opentenbase/opentenbase_ctl/opentenbase-5.21.8-i.x86_64.tar.gz
+    Transfer and extract pkg to servers successfully.
 
-Current directory: /data/opentenbase/pgxc_ctl
-PGXC init all
-Initialize GTM master
-EXECUTE DIRECT ON (dn002) 'ALTER NODE dn002 WITH (TYPE=''datanode'', 	HOST=''10.240.138.159'', PORT=40004, PREFERRED)';
-EXECUTE DIRECT
-EXECUTE DIRECT ON (dn002) 'SELECT pgxc_pool_reload()';
- pgxc_pool_reload 
-------------------
- t
-(1 row)
+step 3: Install gtm master node ...
+    Install gtm0001(172.16.16.49) ...
+    Install gtm0001(172.16.16.49) successfully
+    Success to install  gtm master node. 
 
-Done.
+step 4: Install cn/dn master node ...
+    Install cn0001(172.16.16.49) ...
+    Install dn0001(172.16.16.49) ...
+    Install dn0002(172.16.16.131) ...
+    Install cn0001(172.16.16.49) successfully
+    Install dn0001(172.16.16.49) successfully
+    Install dn0002(172.16.16.131) successfully
+    Success to install all cn/dn master nodes. 
+
+step 5: Install slave nodes ...
+    Install gtm0002(172.16.16.131) ...
+    Install cn0001(172.16.16.131) ...
+    Install dn0001(172.16.16.131) ...
+    Install dn0002(172.16.16.49) ...
+    Install gtm0002(172.16.16.131) successfully
+    Install dn0002(172.16.16.49) successfully
+    Install dn0001(172.16.16.131) successfully
+    Install cn0001(172.16.16.131) successfully
+    Success to install all slave nodes. 
+
+step 6: Create node group ...
+    Create node group successfully. 
+
+====== Installation completed successfully  ====== 
+```
+* 当您看到 'Installation completed successfully' 字样时，表示安装已完成。尽情享受您的 opentenbase 之旅吧。
+* 您可以检查实例的状态
+```
+[opentenbase@VM-16-49-tencentos opentenbase_ctl]$ ./opentenbase_bin_v5.0/bin/opentenbase_ctl status -c opentenbase_config.ini
+
+------------- Instance status -----------  
+Instance name: test_cluster01
+Version: 5.21.8
+
+-------------- Node status --------------  
+Node gtm0001(172.16.16.49) is Running 
+Node dn0001(172.16.16.49) is Running 
+Node dn0002(172.16.16.49) is Running 
+Node cn0001(172.16.16.49) is Running 
+Node dn0002(172.16.16.131) is Running 
+Node cn0001(172.16.16.131) is Running 
+Node gtm0002(172.16.16.131) is Running 
+Node dn0001(172.16.16.131) is Running 
+[Result] Total: 8, Running: 8, Stopped: 0, Unknown: 0
+
+------- Master CN Connection Info -------  
+[1] cn0001(172.16.16.49)  
+Environment variable: export LD_LIBRARY_PATH=/data/opentenbase/install/opentenbase/5.21.8/lib  && export PATH=/data/opentenbase/install/opentenbase/5.21.8/bin:${PATH} 
+PSQL connection: psql -h 172.16.16.49 -p 11000 -U opentenbase postgres 
 ```
 
-- **查看集群状态**	
+## 使用
+* 连接到 CN 主节点执行 SQL
 
-	当发现上面的输出时，集群已经OK，另外也可以通过pgxc_ctl工具的**monitor all**命令来查看集群状态
-	
-```shell
-[opentenbase@localhost ~/pgxc_ctl]$ pgxc_ctl
-/usr/bin/bash
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Reading configuration using /data/opentenbase/pgxc_ctl/pgxc_ctl_bash --home /data/opentenbase/pgxc_ctl --configuration /data/opentenbase/pgxc_ctl/pgxc_ctl.conf
-Finished reading configuration.
-   ******** PGXC_CTL START ***************
+```
+export LD_LIBRARY_PATH=/home/opentenbase/install/opentenbase/5.21.8/lib  && export PATH=/home/opentenbase/install/opentenbase/5.21.8/bin:${PATH} 
+$ psql -h ${CoordinateNode_IP} -p ${CoordinateNode_PORT} -U opentenbase -d postgres
 
-Current directory: /data/opentenbase/pgxc_ctl
-PGXC monitor all
-Running: gtm master
-Not running: gtm slave
-Running: coordinator master cn001
-Running: coordinator master cn002
-Running: datanode master dn001
-Running: datanode slave dn001
-Running: datanode master dn002
-Not running: datanode slave dn002
-```	
-一般的如果配置的不是强同步模式，gtm salve，dn slave的故障不会影响访问。
+postgres=# 
 
-- **集群访问**	
-	访问OpenTenBase集群和访问单机的PostgreSQL基本上无差别，我们可以通过任意一个CN访问数据库集群：例如通过连接CN节点select pgxc\_node表即可查看集群的拓扑结构（当前的配置下备机不会展示在pgxc\_node中），在Linux命令行下通过psql访问的具体示例如下
-	
-```sql
-[opentenbase@localhost ~/pgxc_ctl]$ psql -h 10.215.147.158 -p 30004 -d postgres -U opentenbase
-psql (PostgreSQL 10.0 opentenbase V2)
-Type "help" for help.
-
-postgres=# \d
-Did not find any relations.
-postgres=# select * from pgxc_node;
- node_name | node_type | node_port |   node_host    | nodeis_primary | nodeis_preferred |  node_id   | node_cluster_name 
------------+-----------+-----------+----------------+----------------+------------------+------------+-------------------
- gtm       | G         |     50001 | 10.215.147.158 | t              | f                |  428125959 | opentenbase_cluster
- cn001     | C         |     30004 | 10.215.147.158 | f              | f                | -264077367 | opentenbase_cluster
- cn002     | C         |     30004 | 10.240.138.159 | f              | f                | -674870440 | opentenbase_cluster
- dn001     | D         |     40004 | 10.215.147.158 | t              | t                | 2142761564 | opentenbase_cluster
- dn002     | D         |     40004 | 10.240.138.159 | f              | f                |  -17499968 | opentenbase_cluster
-(5 rows)
 ```
 
-* 使用数据库前需要**创建default group以及sharding表**
-
-OpenTenBase使用datanode group来增加节点的管理灵活度，要求有一个default group才能使用，因此需要预先创建；一般情况下，会将节点的所有datanode节点加入到default group里
-另外一方面，OpenTenBase的数据分布为了增加灵活度，加了中间逻辑层来维护数据记录到物理节点的映射，我们叫sharding，所以需要预先创建sharding，命令如下：
-
-```sql
-postgres=# create default node group default_group  with (dn001,dn002);
-CREATE NODE GROUP
-postgres=# create sharding group to group default_group;
-CREATE SHARDING GROUP
-```
-
-* 创建数据库，用户，创建表，增删查改等操作
-
-至此，就可以跟使用单机数据库一样来访问数据库集群了
-
-```sql
-postgres=# create database test;
-CREATE DATABASE
-postgres=# create user test with password 'test';
-CREATE ROLE
-postgres=# alter database test owner to test;
-ALTER DATABASE
-postgres=# \c test test
-You are now connected to database "test" as user "test".
-test=> create table foo(id bigint, str text) distribute by shard(id);
-CREATE TABLE
-test=> insert into foo values(1, 'tencent'), (2, 'shenzhen');
-COPY 2
-test=> select * from foo;
- id |   str    
-----+----------
-  1 | tencent
-  2 | shenzhen
-(2 rows)
-```
-
-- **停止集群**
-
-通过pgxc_ctl工具的 **stop all** 命令来停止集群，stop all 后面可以加上参数 **-m fast** 或者是 **-m immediate** 来决定如何停止各个节点。
-
-
-```shell
-PGXC stop all -m fast
-Stopping all the coordinator masters.
-Stopping coordinator master cn001.
-Stopping coordinator master cn002.
-Done.
-Stopping all the datanode slaves.
-Stopping datanode slave dn001.
-Stopping datanode slave dn002.
-pg_ctl: PID file "/data/opentenbase/data/dn002/postmaster.pid" does not exist
-Is server running?
-Stopping all the datanode masters.
-Stopping datanode master dn001.
-Stopping datanode master dn002.
-Done.
-Stop GTM slave
-waiting for server to shut down..... done
-server stopped
-Stop GTM master
-waiting for server to shut down.... done
-server stopped
-PGXC monitor all
-Not running: gtm master
-Not running: gtm slave
-Not running: coordinator master cn001
-Not running: coordinator master cn002
-Not running: datanode master dn001
-Not running: datanode slave dn001
-Not running: datanode master dn002
-Not running: datanode slave dn002
-```
-
-- **启动集群**	
-
-	通过pgxc_ctl工具的**start all**命令来启动集群
-	
-```shell
-[opentenbase@localhost ~]$ pgxc_ctl
-/usr/bin/bash
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Reading configuration using /data/opentenbase/pgxc_ctl/pgxc_ctl_bash --home /data/opentenbase/pgxc_ctl --configuration /data/opentenbase/pgxc_ctl/pgxc_ctl.conf
-Finished reading configuration.
-   ******** PGXC_CTL START ***************
-
-Current directory: /data/opentenbase/pgxc_ctl
-PGXC start all
-```
 
 - **结语**	
     本文档只是给用户一个简单的指引，演示如何从源码开始，一步一步搭建一个完整的OpenTenBase集群，后续会有更多的文章来介绍OpenTenBase的特性使用，优化，问题定位等内容。
