@@ -99,6 +99,13 @@ nav:
       - 应用接入: guide/19-txsql_access.md
       - 基础使用: guide/20-txsql_basic.md
       - 高级使用: guide/21-txsql_advanced.md
+      - 使用案例:
+        - 列压缩功能说明: guide/usecase/column_compression.md
+        - 闪回查询: guide/usecase/Flashback.md
+        - RETURNING设计文档: guide/usecase/RETURNING.md
+        - 线程池动态切换方案: guide/usecase/Thread_poll.md
+        - FAST DDL: guide/usecase/FAST_DDL.md
+        - Parallel Copy DDL: guide/usecase/Parallel_Copy_DDL.md
       - 常见问题: guide/22-txsql_faq.md
     - 周边生态:
       - Prometheus/Grafana可视化监控: guide/13-opentenbase_monitoring.md
