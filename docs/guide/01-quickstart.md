@@ -301,7 +301,24 @@ PSQL connection: psql -h 172.16.16.49 -p 11000 -U opentenbase postgres
 export LD_LIBRARY_PATH=/home/opentenbase/install/opentenbase/5.21.8/lib  && export PATH=/home/opentenbase/install/opentenbase/5.21.8/bin:${PATH} 
 $ psql -h ${CoordinateNode_IP} -p ${CoordinateNode_PORT} -U opentenbase -d postgres
 
-postgres=# 
+postgres=# create database test;
+CREATE DATABASE
+postgres=# create user test with password 'test';
+CREATE ROLE
+postgres=# alter database test owner to test;
+ALTER DATABASE
+postgres=# \c test test
+You are now connected to database "test" as user "test".
+test=> create table foo(id bigint, str text) distribute by shard(id);
+CREATE TABLE
+test=> insert into foo values(1, 'tencent'), (2, 'shenzhen');
+COPY 2
+test=> select * from foo;
+ id |   str    
+----+----------
+  1 | tencent
+  2 | shenzhen
+(2 rows)
 
 ```
 
