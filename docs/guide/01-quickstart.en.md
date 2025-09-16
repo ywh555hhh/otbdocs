@@ -30,41 +30,60 @@ Next, let's show how to build a OpenTenBase cluster environment from the source 
 
 ### System Requirements: 
 
-Memory: 4G RAM minimum
+Memory: 8G RAM minimum
 
-OS: TencentOS 2, TencentOS 3, OpenCloudOS, CentOS 7, CentOS 8, Ubuntu
+OS: TencentOS 2, TencentOS 3, OpenCloudOS 8.x, CentOS 7, CentOS 8, Ubuntu 18.04
 
-### Dependence
+### Dependencies
 
-` yum -y install gcc make readline-devel zlib-devel openssl-devel uuid-devel bison flex git`
+``` 
+yum -y install git sudo gcc make readline-devel zlib-devel openssl-devel uuid-devel bison flex cmake postgresql-devel libssh2-devel sshpass  libcurl-devel libxml2-devel
+```
 
 or
 
-` apt install -y gcc make libreadline-dev zlib1g-dev libssl-dev libossp-uuid-dev bison flex git`
-
-- **create user**
-
-	Note: all machines that need to install OpenTenBase cluster need to create
-
 ```
-mkdir /data
-useradd -d /data/opentenbase -s /bin/bash -m opentenbase
+apt install -y git sudo gcc make libreadline-dev zlib1g-dev libssl-dev libossp-uuid-dev bison flex cmake libssh2-1-dev sshpass libxml2-dev language-pack-zh-hans
+```
+
+
+### Create User 'opentenbase'
+
+```bash
+# 1. Make directory /data
+mkdir -p /data
+
+# 2. Add user 
+useradd -d /data/opentenbase -s /bin/bash -m opentenbase # add user opentenbase
+
+# 3. Set password
 passwd opentenbase # set password
+
+# 4. Add users to the wheel group
+# For RedHat
+usermod -aG wheel opentenbase
+# For Debian
+usermod -aG sudo opentenbase
+
+# 5. Enable sudo permissions for the wheel group (via visudo)
+visudo 
+# Then uncomment the line "% wheel", save and exit
 ```
 
-- **get source code**
+### Building
 
-```
+```bash
+su - opentenbase
+cd /data/opentenbase/
 git clone https://github.com/OpenTenBase/OpenTenBase
-```
 
-- **source code compilation**
+export SOURCECODE_PATH=/data/opentenbase/OpenTenBase
+export INSTALL_PATH=/data/opentenbase/install/
 
-```
 cd ${SOURCECODE_PATH}
-rm -rf ${INSTALL_PATH}/opentenbase_bin_v2.0
+rm -rf ${INSTALL_PATH}/opentenbase_bin_v5.0
 chmod +x configure*
-./configure --prefix=${INSTALL_PATH}/opentenbase_bin_v2.0  --enable-user-switch --with-openssl  --with-ossp-uuid CFLAGS=-g
+./configure --prefix=${INSTALL_PATH}/opentenbase_bin_v5.0 --enable-user-switch --with-libxml --disable-license --with-openssl --with-ossp-uuid CFLAGS="-g"
 make clean
 make -sj
 make install
@@ -74,443 +93,217 @@ make -sj
 make install
 ```
 
-In this paper, the above two parameters are as follows
+## Installation
+Use OPENTENBASE\_CTL tool to build a cluster, for example: a cluster with a global transaction management node (GTM), a coordinator(COORDINATOR) and two data nodes (DATANODE).
+<img src="images/topology.png" width="50%" />
+### Preparation
 
-```
-${SOURCECODE_PATH}=/data/opentenbase/OpenTenBase
-${INSTALL_PATH}=/data/opentenbase/install
-```
-
-- **cluster installation**
-
-	- **cluster planning**
-
-	Next, set up a cluster of 1 GTM master, 1 GTM standby, 2 CN master (the CN master is equivalent, so there is no need to standy CN), 2 DN master, and 2 DN standby on two servers. This cluster is the minimum configuration with disaster tolerance capability.
-	
-```
-host1：10.215.147.158
-host2：10.240.138.159
-```
-planning is as follows：
-
-node name|IP|data directory
----|---|---
-GTM master|10.215.147.158|/data/opentenbase/data/gtm
-GTM slave|10.240.138.159|/data/opentenbase/data/gtm
-CN1|10.215.147.158|/data/opentenbase/data/coord
-CN2|10.240.138.159|/data/opentenbase/data/coord
-DN1 master|10.215.147.158|/data/opentenbase/data/dn001
-DN1 slave|10.240.138.159|/data/opentenbase/data/dn001
-DN2 master|10.240.138.159|/data/opentenbase/data/dn002
-DN2 slave|10.215.147.158|/data/opentenbase/data/dn002
-
-Sketch Map:  
-
-![OpenTenBase Deploy Sketch Map](images/node_ip.png)
-
-- **Disable SELinux and firewall (optinal)**
+#### 1. Install opentenbase and import the path of opentenbase installation package into environment variable.
 
 ```shell
-vi /etc/selinux/config # disable SELinux, change SELINUX=enforcing to SELINUX=disabled
-# disable firewall, for Ubuntu, change firewalld to ufw
-systemctl disable firewalld
-systemctl stop firewalld
-```
-
-- **SSH mutual trust configuration between machines**
-
-```shell
-su opentenbase
-ssh-keygen -t rsa
-ssh-copy-id -i ~/.ssh/id_rsa.pub destination-user@destination-server
-```
-
-Reference resources: [Linux ssh mutual trust](https://blog.csdn.net/chenghuikai/article/details/52807074)
-
-- **Environment variable configuration**
-
-All machines in the cluster need to be configured
-
-```shell
-[opentenbase@localhost ~]$ vim ~/.bashrc
-export OPENTENBASE_HOME=/data/opentenbase/install/opentenbase_bin_v2.0
-export PATH=$OPENTENBASE_HOME/bin:$PATH
-export LD_LIBRARY_PATH=$OPENTENBASE_HOME/lib:${LD_LIBRARY_PATH}
+PG_HOME=${INSTALL_PATH}/opentenbase_bin_v5.0
+export PATH="$PATH:$PG_HOME/bin"
+export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PG_HOME/lib"
 export LC_ALL=C
 ```
 
-Above, the required basic environment has been configured, and you can enter the cluster initialization stage. For the convenience of users, OpenTenBase provides special configuration and operation tools: **pgxc_ctl** to help users quickly build and manage clusters. Here, you need to write the IP, port and data directory of the nodes mentioned above into the configuration file pgxc\_ctl.conf
+#### 2. Disable SELinux and firewall (optional)
 
-- **Initialization configuration file pgxc_ctl.conf**
+```
+vi /etc/selinux/config 
+set SELINUX=disabled
 
-```shell
-[opentenbase@localhost ~]$ mkdir /data/opentenbase/pgxc_ctl
-[opentenbase@localhost ~]$ cd /data/opentenbase/pgxc_ctl
-[opentenbase@localhost ~/pgxc_ctl]$ vim pgxc_ctl.conf
+# Disable firewalld
+sudo systemctl disable firewalld
+sudo systemctl stop firewalld
 ```
 
-The following shows the pgxc\_ctl.conf file content written using the IP, port, database directory, binary directory and other planning values described above. In practice, we only need to configure it according to our own actual situation.
+#### 3. Create the *.tar.gz package for initializing instances.
 
-We can also download and rename it to ```pgxc_ctl.conf``` and configure it according to our own actual situation.
+```
+cd ${PG_HOME}
+tar -zcf ${INSTALL_PATH}/opentenbase-5.21.8-i.x86_64.tar.gz *
+cd ${INSTALL_PATH}
+```
 
-[Download Double Node Conf](./pgxc_ctl_double.conf)
+### Cluster startup steps
 
-[Download Single Node Conf](./pgxc_ctl_single.conf)
+#### Generate and fill in configuration file opentenbase\_config.ini .
+opentenbase\_ctl tool can generate a template for the configuration file. You need to fill in the cluster node information in the template. After the opentenbase\_ctl tool is started, opentenbase\_ctl directory will be generated in the current user's home directory. After entering " prepare config" command, the configuration file template that can be directly modified will be generated in opentenbase\_ctl directory.
 
-
-```shell
-#!/bin/bash
-# Double Node Config
-
-IP_1=10.215.147.158
-IP_2=10.240.138.159
-
-pgxcInstallDir=/data/opentenbase/install/opentenbase_bin_v2.0
-pgxcOwner=opentenbase
-defaultDatabase=postgres
-pgxcUser=$pgxcOwner
-tmpDir=/tmp
-localTmpDir=$tmpDir
-configBackup=n
-configBackupHost=pgxc-linker
-configBackupDir=$HOME/pgxc
-configBackupFile=pgxc_ctl.bak
-
-
-#---- GTM ----------
-gtmName=gtm
-gtmMasterServer=$IP_1
-gtmMasterPort=50001
-gtmMasterDir=/data/opentenbase/data/gtm
-gtmExtraConfig=none
-gtmMasterSpecificExtraConfig=none
-gtmSlave=y
-gtmSlaveServer=$IP_2
-gtmSlavePort=50001
-gtmSlaveDir=/data/opentenbase/data/gtm
-gtmSlaveSpecificExtraConfig=none
-
-#---- Coordinators -------
-coordMasterDir=/data/opentenbase/data/coord
-coordArchLogDir=/data/opentenbase/data/coord_archlog
-
-coordNames=(cn001 cn002 )
-coordPorts=(30004 30004 )
-poolerPorts=(31110 31110 )
-coordPgHbaEntries=(0.0.0.0/0)
-coordMasterServers=($IP_1 $IP_2)
-coordMasterDirs=($coordMasterDir $coordMasterDir)
-coordMaxWALsernder=2
-coordMaxWALSenders=($coordMaxWALsernder $coordMaxWALsernder )
-coordSlave=n
-coordSlaveSync=n
-coordArchLogDirs=($coordArchLogDir $coordArchLogDir)
-
-coordExtraConfig=coordExtraConfig
-cat > $coordExtraConfig <<EOF
-#================================================
-# Added to all the coordinator postgresql.conf
-# Original: $coordExtraConfig
-
-include_if_exists = '/data/opentenbase/global/global_opentenbase.conf'
-
-wal_level = replica
-wal_keep_segments = 256 
-max_wal_senders = 4
-archive_mode = on 
-archive_timeout = 1800 
-archive_command = 'echo 0' 
-log_truncate_on_rotation = on 
-log_filename = 'postgresql-%M.log' 
-log_rotation_age = 4h 
-log_rotation_size = 100MB
-hot_standby = on 
-wal_sender_timeout = 30min 
-wal_receiver_timeout = 30min 
-shared_buffers = 1024MB 
-max_pool_size = 2000
-log_statement = 'ddl'
-log_destination = 'csvlog'
-logging_collector = on
-log_directory = 'pg_log'
-listen_addresses = '*'
-max_connections = 2000
-
-EOF
-
-coordSpecificExtraConfig=(none none)
-coordExtraPgHba=coordExtraPgHba
-cat > $coordExtraPgHba <<EOF
-
-local   all             all                                     trust
-host    all             all             0.0.0.0/0               trust
-host    replication     all             0.0.0.0/0               trust
-host    all             all             ::1/128                 trust
-host    replication     all             ::1/128                 trust
-
-
-EOF
-
-
-coordSpecificExtraPgHba=(none none)
-coordAdditionalSlaves=n	
-cad1_Sync=n
-
-#---- Datanodes ---------------------
-dn1MstrDir=/data/opentenbase/data/dn001
-dn2MstrDir=/data/opentenbase/data/dn002
-dn1SlvDir=/data/opentenbase/data/dn001
-dn2SlvDir=/data/opentenbase/data/dn002
-dn1ALDir=/data/opentenbase/data/datanode_archlog
-dn2ALDir=/data/opentenbase/data/datanode_archlog
-
-primaryDatanode=dn001
-datanodeNames=(dn001 dn002)
-datanodePorts=(40004 40004)
-datanodePoolerPorts=(41110 41110)
-datanodePgHbaEntries=(0.0.0.0/0)
-datanodeMasterServers=($IP_1 $IP_2)
-datanodeMasterDirs=($dn1MstrDir $dn2MstrDir)
-dnWALSndr=4
-datanodeMaxWALSenders=($dnWALSndr $dnWALSndr)
-
-datanodeSlave=y
-datanodeSlaveServers=($IP_2 $IP_1)
-datanodeSlavePorts=(50004 54004)
-datanodeSlavePoolerPorts=(51110 51110)
-datanodeSlaveSync=n
-datanodeSlaveDirs=($dn1SlvDir $dn2SlvDir)
-datanodeArchLogDirs=($dn1ALDir/dn001 $dn2ALDir/dn002)
-
-datanodeExtraConfig=datanodeExtraConfig
-cat > $datanodeExtraConfig <<EOF
-#================================================
-# Added to all the coordinator postgresql.conf
-# Original: $datanodeExtraConfig
-
-include_if_exists = '/data/opentenbase/global/global_opentenbase.conf'
-listen_addresses = '*' 
-wal_level = replica 
-wal_keep_segments = 256 
-max_wal_senders = 4
-archive_mode = on 
-archive_timeout = 1800 
-archive_command = 'echo 0' 
-log_directory = 'pg_log' 
-logging_collector = on 
-log_truncate_on_rotation = on 
-log_filename = 'postgresql-%M.log' 
-log_rotation_age = 4h 
-log_rotation_size = 100MB
-hot_standby = on 
-wal_sender_timeout = 30min 
-wal_receiver_timeout = 30min 
-shared_buffers = 1024MB 
-max_connections = 4000 
-max_pool_size = 4000
-log_statement = 'ddl'
-log_destination = 'csvlog'
-wal_buffers = 1GB
-
-EOF
-
-datanodeSpecificExtraConfig=(none none)
-datanodeExtraPgHba=datanodeExtraPgHba
-cat > $datanodeExtraPgHba <<EOF
-
-local   all             all                                     trust
-host    all             all             0.0.0.0/0               trust
-host    replication     all             0.0.0.0/0               trust
-host    all             all             ::1/128                 trust
-host    replication     all             ::1/128                 trust
-
-
-EOF
-
-
-datanodeSpecificExtraPgHba=(none none)
-
-datanodeAdditionalSlaves=n
-walArchive=n
+* Description of each field in opentenbase\_config.ini
+```
+| Configuration Category | Configuration Item | Description                                                                |
+|------------------------|-------------------|----------------------------------------------------------------------------|
+| instance               | name              | Instance name, available characters: letters, numbers, underscores, e.g.: opentenbase_instance01 |
+|                        | type              | distributed represents distributed mode, requires gtm, coordinator and data nodes; centralized represents centralized mode |
+|                        | package           | Software package. Full path (recommended) or relative path to opentenbase_ctl |
+| gtm                    | master            | Master node, only one IP                                                   |
+|                        | slave             | Slave nodes. If n slave nodes are needed, configure n IPs here, separated by commas |
+| coordinators           | master            | Master node IPs, automatically generate node names, deploy nodes-per-server nodes on each IP |
+|                        | slave             | Slave node IPs, the number is an integer multiple of master               |
+|                        |                   | Example: If 1 master 1 slave, the number of IPs is the same as master; if 1 master 2 slaves, the number of IPs is twice that of master |
+|                        | nodes-per-server  | Optional, default 1. Number of nodes deployed on each IP. Example: master has 3 IPs, configured as 2, then there will be 6 nodes |
+|                        |                   | cn001-cn006 total 6 nodes, 2 nodes distributed on each server            |
+| datanodes              | master            | Master node IPs, automatically generate node names, deploy nodes-per-server nodes on each IP |
+|                        | slave             | Slave node IPs, the number is an integer multiple of master               |
+|                        |                   | Example: If 1 master 1 slave, the number of IPs is the same as master; if 1 master 2 slaves, the number of IPs is twice that of master |
+|                        | nodes-per-server  | Optional, default 1. Number of nodes deployed on each IP. Example: master has 3 IPs, configured as 2, then there will be 6 nodes |
+|                        |                   | dn001-dn006 total 6 nodes, 2 nodes distributed on each server            |
+| server                 | ssh-user          | Username for remote command execution, needs to be created in advance, all servers should have the same account for simpler configuration management |
+|                        | ssh-password      | Password for remote command execution, needs to be created in advance, all servers should have the same password for simpler configuration management |
+|                        | ssh-port          | SSH port, all servers should be consistent for simpler configuration management |
+| log                    | level             | Log level for opentenbase_ctl tool execution (not the log level of opentenbase nodes) |
 
 ```
 
-- **Distribute binary package**
-
-After writing the configuration file, you need to deploy the binary package to the physical machine where all nodes are located. This can be done by executing the **deploy all** command with pgxc\_ctl tool.
-
-```shell
-[opentenbase@localhost ~/pgxc_ctl]$ pgxc_ctl 
-/usr/bin/bash
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Reading configuration using /data/opentenbase/pgxc_ctl/pgxc_ctl_bash --home /data/opentenbase/pgxc_ctl --configuration /data/opentenbase/pgxc_ctl/pgxc_ctl.conf
-Finished reading configuration.
-   ******** PGXC_CTL START ***************
-
-Current directory: /data/opentenbase/pgxc_ctl
-PGXC deploy all
-Deploying Postgres-XL components to all the target servers.
-Prepare tarball to deploy ... 
-Deploying to the server 10.215.147.158.
-Deploying to the server 10.240.138.159.
-Deployment done.
+#### 1. Create a configuration file opentenbase\_config.ini for the instance
+```
+mkdir -p ./logs
+touch opentenbase_config.ini
+vim opentenbase_config.ini
 ```
 
-Log in to all nodes and check whether the binary package is distributed
-
+* For example, if I have two servers 172.16.16.49 and 172.16.16.131, the typical configuration of a distributed instance distributed across the two servers is as follows. You can copy this configuration information and make modifications according to your deployment requirements. Don't forget to fill in the ssh password configuration.
 ```
-[opentenbase@localhost ~/install]$ ls /data/opentenbase/install/opentenbase_bin_v2.0
-bin  include  lib  share	
-```
+# Instance configuration
+[instance]
+name=opentenbase01
+type=distributed
+package=/data/opentenbase/install/opentenbase-5.21.8-i.x86_64.tar.gz
 
-* execute **init all** command to complete cluster initialization
+# GTM nodes
+[gtm]
+master=172.16.16.49
+slave=172.16.16.50,172.16.16.131
 
-```shell
-[opentenbase@localhost ~]$ pgxc_ctl
-/usr/bin/bash
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Reading configuration using /data/opentenbase/pgxc_ctl/pgxc_ctl_bash --home /data/opentenbase/pgxc_ctl --configuration /data/opentenbase/pgxc_ctl/pgxc_ctl.conf
-Finished reading configuration.
-   ******** PGXC_CTL START ***************
+# Coordinator nodes
+[coordinators]
+master=172.16.16.49
+slave= 172.16.16.131
+nodes-per-server=1
 
-Current directory: /data/opentenbase/pgxc_ctl
-PGXC init all
-Initialize GTM master
-....
-....
-Initialize datanode slave dn001
-Initialize datanode slave dn002
-mkdir: cannot create directory '/data1/opentenbase': Permission denied
-chmod: cannot access '/data1/opentenbase/data/dn001': No such file or directory
-pg_ctl: directory "/data1/opentenbase/data/dn001" does not exist
-pg_basebackup: could not create directory "/data1/opentenbase": Permission denied
-```
+# Data nodes
+[datanodes]
+master=172.16.16.49,172.16.16.131
+slave=172.16.16.131,172.16.16.49
+nodes-per-server=1
 
-- **Installation error handling**
+# Login and deployment account
+[server]
+ssh-user=opentenbase
+ssh-password=
+ssh-port=36000
 
-Generally, if there is an error in initializing the cluster, the terminal will print out the error log. You can look up the error reason and change the configuration, or through the error log in '/data/OpenTenBase/pgxc\_ctl/pgxc\_log' path to check the error in the configuration file
-
-```shell
-[opentenbase@localhost ~]$ ll ~/pgxc_ctl/pgxc_log/
-total 184
--rw-rw-r-- 1 opentenbase opentenbase 81123 Nov 13 17:22 14105_pgxc_ctl.log
--rw-rw-r-- 1 opentenbase opentenbase  2861 Nov 13 17:58 15762_pgxc_ctl.log
--rw-rw-r-- 1 opentenbase opentenbase 14823 Nov 14 07:59 16671_pgxc_ctl.log
--rw-rw-r-- 1 opentenbase opentenbase  2721 Nov 13 16:52 18891_pgxc_ctl.log
--rw-rw-r-- 1 opentenbase opentenbase  1409 Nov 13 16:20 22603_pgxc_ctl.log
--rw-rw-r-- 1 opentenbase opentenbase 60043 Nov 13 16:33 28932_pgxc_ctl.log
--rw-rw-r-- 1 opentenbase opentenbase 15671 Nov 14 07:57 6849_pgxc_ctl.log
+# Log configuration
+[log]
+level=DEBUG
 ```
 
-By running pgxc\_ctl tool, execute **clean all** command to delete the initialized file. Then modify the pgxc\_ctl.conf file，and execute the **init all** command to reinitialize.
 
+* Similarly, the configuration of a typical centralized instance is as follows. Don't forget to fill in the ssh password configuration.
+```
+# Instance configuration
+[instance]
+name=opentenbase02
+type=centralized
+package=/data/opentenbase/install/opentenbase-5.21.8-i.x86_64.tar.gz
 
-```shell
-[opentenbase@localhost ~]$ pgxc_ctl
-/usr/bin/bash
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Reading configuration using /data/opentenbase/pgxc_ctl/pgxc_ctl_bash --home /data/opentenbase/pgxc_ctl --configuration /data/opentenbase/pgxc_ctl/pgxc_ctl.conf
-Finished reading configuration.
-   ******** PGXC_CTL START ***************
+# Data nodes
+[datanodes]
+master=172.16.16.49
+slave=172.16.16.131
+nodes-per-server=1
 
-Current directory: /data/opentenbase/pgxc_ctl
-PGXC clean all
+# Login and deployment account
+[server]
+ssh-user=opentenbase
+ssh-password=
+ssh-port=36000
 
-
-[opentenbase@localhost ~]$ pgxc_ctl
-/usr/bin/bash
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Reading configuration using /data/opentenbase/pgxc_ctl/pgxc_ctl_bash --home /data/opentenbase/pgxc_ctl --configuration /data/opentenbase/pgxc_ctl/pgxc_ctl.conf
-Finished reading configuration.
-   ******** PGXC_CTL START ***************
-
-Current directory: /data/opentenbase/pgxc_ctl
-PGXC init all
-Initialize GTM master
-EXECUTE DIRECT ON (dn002) 'ALTER NODE dn002 WITH (TYPE=''datanode'', 	HOST=''10.240.138.159'', PORT=40004, PREFERRED)';
-EXECUTE DIRECT
-EXECUTE DIRECT ON (dn002) 'SELECT pgxc_pool_reload()';
- pgxc_pool_reload 
-------------------
- t
-(1 row)
-
-Done.
+# Log configuration
+[log]
+level=DEBUG
 ```
 
-- **Show cluster status**	
-	
-	When the above output is found, the cluster is OK. In addition, you can show the cluster status through the **monitor all** command of the pgxc\_ctl tool
-	
-```shell
-[opentenbase@localhost ~/pgxc_ctl]$ pgxc_ctl
-/usr/bin/bash
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Reading configuration using /data/opentenbase/pgxc_ctl/pgxc_ctl_bash --home /data/opentenbase/pgxc_ctl --configuration /data/opentenbase/pgxc_ctl/pgxc_ctl.conf
-Finished reading configuration.
-   ******** PGXC_CTL START ***************
+#### 2. Execute command for instance installation.
 
-Current directory: /data/opentenbase/pgxc_ctl
-PGXC monitor all
-Running: gtm master
-Not running: gtm slave
-Running: coordinator master cn001
-Running: coordinator master cn002
-Running: datanode master dn001
-Running: datanode slave dn001
-Running: datanode master dn002
-Not running: datanode slave dn002
-```	
+```
+opentenbase_ctl install  -c opentenbase_config.ini
 
-If the replication mode between the master and slave nodes is not synchronous replication (meaning asynchronous replication), the failure of GTM salve and DN slave will not affect the access.
+====== Start to Install Opentenbase test_cluster01  ====== 
 
-- **cluster access**
+step 1: Make *.tar.gz pkg ...
+    Make opentenbase-5.21.8-i.x86_64.tar.gz successfully.
 
-	There is basically no difference between accessing OpenTenBase cluster and PostgreSQL. We can access database cluster through any CN: for example, we can view the topology of the cluster by connecting CN node to select pgxc\_node table (the standby node will not be shown in pgxc\_node under the current configuration).   
-	The example of accessing through psql under the Linux command line is as follows:
-	
-```sql
-[opentenbase@localhost ~/pgxc_ctl]$ psql -h 10.215.147.158 -p 30004 -d postgres -U opentenbase
-psql (PostgreSQL 10.0 opentenbase V2)
-Type "help" for help.
+step 2: Transfer and extract pkg to servers ...
+    Package_path: /data/opentenbase/opentenbase_ctl/opentenbase-5.21.8-i.x86_64.tar.gz
+    Transfer and extract pkg to servers successfully.
 
-postgres=# \d
-Did not find any relations.
-postgres=# select * from pgxc_node;
- node_name | node_type | node_port |   node_host    | nodeis_primary | nodeis_preferred |  node_id   | node_cluster_name 
------------+-----------+-----------+----------------+----------------+------------------+------------+-------------------
- gtm       | G         |     50001 | 10.215.147.158 | t              | f                |  428125959 | opentenbase_cluster
- cn001     | C         |     30004 | 10.215.147.158 | f              | f                | -264077367 | opentenbase_cluster
- cn002     | C         |     30004 | 10.240.138.159 | f              | f                | -674870440 | opentenbase_cluster
- dn001     | D         |     40004 | 10.215.147.158 | t              | t                | 2142761564 | opentenbase_cluster
- dn002     | D         |     40004 | 10.240.138.159 | f              | f                |  -17499968 | opentenbase_cluster
-(5 rows)
+step 3: Install gtm master node ...
+    Install gtm0001(172.16.16.49) ...
+    Install gtm0001(172.16.16.49) successfully
+    Success to install  gtm master node. 
+
+step 4: Install cn/dn master node ...
+    Install cn0001(172.16.16.49) ...
+    Install dn0001(172.16.16.49) ...
+    Install dn0002(172.16.16.131) ...
+    Install cn0001(172.16.16.49) successfully
+    Install dn0001(172.16.16.49) successfully
+    Install dn0002(172.16.16.131) successfully
+    Success to install all cn/dn master nodes. 
+
+step 5: Install slave nodes ...
+    Install gtm0002(172.16.16.131) ...
+    Install cn0001(172.16.16.131) ...
+    Install dn0001(172.16.16.131) ...
+    Install dn0002(172.16.16.49) ...
+    Install gtm0002(172.16.16.131) successfully
+    Install dn0002(172.16.16.49) successfully
+    Install dn0001(172.16.16.131) successfully
+    Install cn0001(172.16.16.131) successfully
+    Success to install all slave nodes. 
+
+step 6:Create node group ...
+    Create node group successfully. 
+
+====== Installation completed successfully  ====== 
+```
+* When you see the words 'Installation completed successfully', it means that the installation has been completed. Enjoy your opentenbase journey to the fullest.
+* You can check the status of the instance
+```
+[opentenbase@VM-16-49-tencentos opentenbase_ctl]$ ./opentenbase_bin_v5.0/bin/opentenbase_ctl status -c opentenbase_config.ini
+
+------------- Instance status -----------  
+Instance name: test_cluster01
+Version: 5.21.8
+
+-------------- Node status --------------  
+Node gtm0001(172.16.16.49) is Running 
+Node dn0001(172.16.16.49) is Running 
+Node dn0002(172.16.16.49) is Running 
+Node cn0001(172.16.16.49) is Running 
+Node dn0002(172.16.16.131) is Running 
+Node cn0001(172.16.16.131) is Running 
+Node gtm0002(172.16.16.131) is Running 
+Node dn0001(172.16.16.131) is Running 
+[Result] Total: 8, Running: 8, Stopped: 0, Unknown: 0
+
+------- Master CN Connection Info -------  
+[1] cn0001(172.16.16.49)  
+Environment variable: export LD_LIBRARY_PATH=/data/opentenbase/install/opentenbase/5.21.8/lib  && export PATH=/data/opentenbase/install/opentenbase/5.21.8/bin:${PATH} 
+PSQL connection: psql -h 172.16.16.49 -p 11000 -U opentenbase postgres 
 ```
 
-* Before using the database, you need to **create the default group and sharding group**
 
-OpenTenBase uses datanode group to increase the management flexibility of nodes. A default group is required to be used, so it needs to be created in advance. In general, all datanode nodes will be added to the default group.  
+## Usage
+* Connect to CN Master node to execute SQL
 
- On the other hand, in order to increase the flexibility of OpenTenBase data distribution, an intermediate logic layer is added to maintain the mapping of data records to physical nodes, which is called sharding. Therefore, sharding needs to be created in advance. The command is as follows:
- 
-
-```sql
-postgres=# create default node group default_group  with (dn001,dn002);
-CREATE NODE GROUP
-postgres=# create sharding group to group default_group;
-CREATE SHARDING GROUP
 ```
+export LD_LIBRARY_PATH=/home/opentenbase/install/opentenbase/5.21.8/lib  && export PATH=/home/opentenbase/install/opentenbase/5.21.8/bin:${PATH} 
+$ psql -h ${CoordinateNode_IP} -p ${CoordinateNode_PORT} -U opentenbase -d postgres
 
-* Create database, user, table, insert/delete/update/select, etc
-
-Now you can access the database cluster just like you can use a stand-alone database
-
-```sql
 postgres=# create database test;
 CREATE DATABASE
 postgres=# create user test with password 'test';
@@ -529,60 +322,7 @@ test=> select * from foo;
   1 | tencent
   2 | shenzhen
 (2 rows)
-```
 
-- **stop cluster**	
-
-	Stop the cluster through the **stop all** command of pgxc\_ctl tool.  
-	The **stop all** command can be followed by the parameter **-m fast** or **-m immediate** to decide how to stop each node	
-
-```shell
-PGXC stop all -m fast
-Stopping all the coordinator masters.
-Stopping coordinator master cn001.
-Stopping coordinator master cn002.
-Done.
-Stopping all the datanode slaves.
-Stopping datanode slave dn001.
-Stopping datanode slave dn002.
-pg_ctl: PID file "/data/opentenbase/data/dn002/postmaster.pid" does not exist
-Is server running?
-Stopping all the datanode masters.
-Stopping datanode master dn001.
-Stopping datanode master dn002.
-Done.
-Stop GTM slave
-waiting for server to shut down..... done
-server stopped
-Stop GTM master
-waiting for server to shut down.... done
-server stopped
-PGXC monitor all
-Not running: gtm master
-Not running: gtm slave
-Not running: coordinator master cn001
-Not running: coordinator master cn002
-Not running: datanode master dn001
-Not running: datanode slave dn001
-Not running: datanode master dn002
-Not running: datanode slave dn002
-```
-
-- **start cluster**	  
-
-	Start the cluster through the **start all** command of pgxc\_ctl tool. 
-	
-```shell
-[opentenbase@localhost ~]$ pgxc_ctl
-/usr/bin/bash
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Installing pgxc_ctl_bash script as /data/opentenbase/pgxc_ctl/pgxc_ctl_bash.
-Reading configuration using /data/opentenbase/pgxc_ctl/pgxc_ctl_bash --home /data/opentenbase/pgxc_ctl --configuration /data/opentenbase/pgxc_ctl/pgxc_ctl.conf
-Finished reading configuration.
-   ******** PGXC_CTL START ***************
-
-Current directory: /data/opentenbase/pgxc_ctl
-PGXC start all
 ```
 
 - **Concluding remarks**	
